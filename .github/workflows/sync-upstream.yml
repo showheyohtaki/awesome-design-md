@@ -1,0 +1,49 @@
+name: Sync upstream
+
+on:
+  schedule:
+    - cron: '0 9 * * 1'  # 毎週月曜 9:00 UTC (日本時間 18:00)
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sync from upstream
+        id: sync
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/VoltAgent/awesome-design-md.git || true
+          git fetch upstream
+
+          BEFORE=$(git rev-parse HEAD)
+          git merge upstream/main --no-edit || {
+            echo "::error::Merge conflict detected"
+            exit 1
+          }
+          AFTER=$(git rev-parse HEAD)
+
+          if [ "$BEFORE" != "$AFTER" ]; then
+            echo "updated=true" >> "$GITHUB_OUTPUT"
+            git push origin main
+          else
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+            echo "Already up to date."
+          fi
+
+      - name: Notify Slack
+        if: steps.sync.outputs.updated == 'true'
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+        run: |
+          if [ -n "$SLACK_WEBHOOK" ]; then
+            curl -s -X POST "$SLACK_WEBHOOK" \
+              -H 'Content-type: application/json' \
+              -d '{"text":":art: awesome-design-md に更新があります。司令塔リポで `git submodule update --remote design-systems` を実行してください。"}'
+          fi
